@@ -6,8 +6,10 @@ from keras.layers import Dropout
 from keras.models import Model, Sequential
 import keras.backend as K
 from keras.activations import softmax
+from keras.utils import Progbar
 import warnings
 import numpy as np
+import math
 
 
 class Unbias(object):
@@ -123,8 +125,9 @@ class Unbias(object):
         model.compile(loss=loss, optimizer=opt, metrics=met)
         self.inference_model = model
 
-    def train_discriminators_on_batch(self, x, *labels):
-        assert type(labels) in (list, tuple)
+    def train_discriminators_on_batch(self, x, labels):
+        if isinstance(labels[0], np.ndarray):
+            labels = [labels]
         assert len(labels) == len(self.discriminators)
         morphed = self.morpher.predict(x)
         for label, disc in zip(labels, self.disc_trainers):
@@ -136,10 +139,43 @@ class Unbias(object):
     def train_morpher_on_batch(self, x):
         self.morpher_trainer.train_on_batch(x, np.zeros((x.shape[0], 1)))
 
-    def train_on_batch(self, x, y, *labels):
+    def train_on_batch(self, x, y, labels):
+        if isinstance(labels[0], np.ndarray):
+            labels = [labels]
         self.train_morpher_on_batch(x)
-        self.train_discriminators_on_batch(x, *labels)
+        self.train_discriminators_on_batch(x, labels)
         self.train_morpher_and_task_on_batch(x, y)
+
+    def fit(self, x, y, labels, batch_size=None, epochs=1, validation_split=None):
+        if batch_size is None:
+            batch_size = 32
+        num_steps = float(len(x)) / batch_size
+        num_steps = math.ceil(num_steps)
+        if validation_split is None:
+            x_train = x
+            y_train = y
+            labels_train = labels
+        else:
+            num_validation = int(len(x) * validation_split)
+            x_train = x[:-num_validation]
+            y_train = y[:-num_validation]
+            labels_train = [l[:-num_validation] for l in labels]
+        for epoch in range(epochs):
+            print('Epoch {}'.format(epoch + 1))
+            pbar = Progbar(len(x_train))
+            for i in range(0, len(x_train), batch_size):
+                x_batch = x_train[i: i + batch_size]
+                y_batch = y_train[i: i + batch_size]
+                labels_batch = [l[i: i + batch_size] for l in labels_train]
+                self.train_on_batch(x_batch, y_batch, labels_batch)
+                pbar.add(len(x_batch))
+        if validation_split is not None:
+            x_test = x[-num_validation:]
+            y_test = y[-num_validation:]
+            labels_test = [l[-num_validation:] for l in labels]
+            task_result = self.inference_model.evaluate(x_test, y_test)
+            bias = get_bias(self.morpher.predict(x_test), labels_test)
+            return task_result, bias
 
 
 def get_bias(inputs, labels):

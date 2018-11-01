@@ -4,7 +4,7 @@ from unbias import Unbias
 from keras.layers import *
 from keras.models import *
 
-inputs, outputs, labels = get_data(3200, 100, 'classification', 2, 2, epochs=100)
+inputs, outputs, labels = get_data(3200, 100, 'classification', 2, 2, epochs=10)
 
 bias = get_bias(inputs, labels)
 
@@ -42,7 +42,7 @@ def get_task():
     model.add(Dense(100, input_dim=100))
     #model.add(Activation('relu'))
     model.add(Dense(2, activation='softmax'))
-    model.compile(loss='categorical_crossentropy', optimizer='adam')
+    model.compile(loss='categorical_crossentropy', optimizer='adam', metrics=['acc'])
     return model
 
 
@@ -51,3 +51,6 @@ morpher = get_morpher()
 discriminator = get_discriminator()
 
 unbias = Unbias(task, morpher, discriminator)
+
+result = unbias.fit(inputs, outputs, labels, epochs=10, validation_split=0.1)
+print(result)
