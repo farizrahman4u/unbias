@@ -1,11 +1,13 @@
 from keras.layers import Input, Lambda
-from keras.layers import multiply
+from keras.layers import multiply, add
 from keras.layers import Activation
-from keras.models import Model
+from keras.layers import Dense
+from keras.layers import Dropout
+from keras.models import Model, Sequential
 import keras.backend as K
 from keras.activations import softmax
 import warnings
-
+import numpy as np
 
 
 class Unbias(object):
@@ -98,29 +100,28 @@ class Unbias(object):
             return am
         max_layer = Lambda(maxf, output_shape=lambda s: s[:-1] + (1,))
         maxes = [max_layer(disc_out) for disc_out in disc_outs]
-        def bias(x, n):
-            return (n * x - 1.) / (n - 1.)
         def gate(x, n):
-            return 1. - bias(x, n)
+            return 1. - x
         gates = []
         for i, mx in enumerate(maxes):
             n = self.discriminators[i].output_shape[-1]
             gate_layer = Lambda(gate, arguments={'n': n})
             gates.append(gate_layer(mx))
-        prod = multiply(gates + [morphed])
-        switch = Lambda(lambda x: K.in_train_phase(x[0], x[1]), output_shape=lambda s: s[0])
-        task_input = switch([prod, morphed])
+        if len(gates) > 1:
+            prod = multiply(gates)
+        else:
+            prod = gates[0]
+        morpher_trainer = Model(inp, prod)
+        morpher_trainer.compile(loss='mse', optimizer='adam', metrics=['acc'])
+        self.morpher_trainer = morpher_trainer
+        task_input = morphed
         out = self.task(task_input)
         model = Model(inp, out)
         loss = self.task.loss
         opt = self.task.optimizer
         met = self.task.metrics
         model.compile(loss=loss, optimizer=opt, metrics=met)
-        self.combined_model = model
-        inp = Input(batch_shape=self.morpher.input_shape)
-        morphed = self.morpher(inp)
-        out = self.task(morphed)
-        self.inference_model = Model(inp, out)
+        self.inference_model = model
 
     def train_discriminators_on_batch(self, x, *labels):
         assert type(labels) in (list, tuple)
@@ -130,8 +131,43 @@ class Unbias(object):
             disc.train_on_batch(morphed, label)
 
     def train_morpher_and_task_on_batch(self, x, y):
-        self.combined_model.train_on_batch(x, y)
+        self.inference_model.train_on_batch(x, y)
+
+    def train_morpher_on_batch(self, x):
+        self.morpher_trainer.train_on_batch(x, np.zeros((x.shape[0], 1)))
 
     def train_on_batch(self, x, y, *labels):
+        self.train_morpher_on_batch(x)
         self.train_discriminators_on_batch(x, *labels)
         self.train_morpher_and_task_on_batch(x, y)
+
+
+def get_bias(inputs, labels):
+    input_dim = inputs.shape[-1]
+
+    biases = []
+    for disc_vecs in labels:
+        num_categories = disc_vecs.shape[-1]
+        clf = Sequential()
+        clf.add(Dense(input_dim, input_dim=input_dim))
+        clf.add(Activation('tanh'))
+        clf.add(Dropout(0.2))
+        clf.add(Dense(input_dim))
+        clf.add(Activation('tanh'))
+        clf.add(Dropout(0.2))
+        clf.add(Dense(input_dim))
+        clf.add(Activation('tanh'))
+        clf.add(Dropout(0.2))
+        clf.add(Dense(num_categories))
+        clf.add(Activation('softmax'))
+        clf.compile(loss='categorical_crossentropy', optimizer='adam', metrics=['acc'])
+        split = 0.9
+        num_train = int(len(inputs) * split)
+        clf.fit(inputs[:num_train], disc_vecs[:num_train], epochs=100)
+        acc = clf.evaluate(inputs[num_train:], disc_vecs[num_train:])[1]
+        bias = acc - 1. / num_categories
+        if bias < 0:
+            bias = 0.
+        biases.append(bias)
+
+    return biases

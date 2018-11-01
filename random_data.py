@@ -78,33 +78,3 @@ def get_data(num_samples, input_dim, task_type='classification', output_dim=2, n
     encoder_output_vectors = encoder.predict(encoder_input_vectors)
 
     return encoder_output_vectors, output_vectors, disc_vecs
-
-
-def validate_bias(data):
-    inputs, outputs, labels = data
-    input_dim = inputs.shape[-1]
-
-    accs = []
-    for disc_vecs in labels:
-        num_categories = disc_vecs.shape[-1]
-        clf = Sequential()
-        clf.add(Dense(input_dim, input_dim=input_dim))
-        clf.add(Activation('tanh'))
-        clf.add(Dropout(0.2))
-        clf.add(Dense(input_dim))
-        clf.add(Activation('tanh'))
-        clf.add(Dropout(0.2))
-        clf.add(Dense(input_dim))
-        clf.add(Activation('tanh'))
-        clf.add(Dropout(0.2))
-        clf.add(Dense(num_categories))
-        clf.add(Activation('softmax'))
-        clf.compile(loss='categorical_crossentropy', optimizer='adam', metrics=['acc'])
-        split = 0.9
-        num_train = int(len(inputs) * split)
-        clf.fit(inputs[:num_train], disc_vecs[:num_train], epochs=100)
-        acc = clf.evaluate(inputs[num_train:], disc_vecs[num_train:])[1]
-        accs.append(acc)
-
-    return accs
-
