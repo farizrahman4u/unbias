@@ -37,3 +37,28 @@ But your data is probably biased, and your model will learn these biases as well
 
 Note that your model can learn biases along such axes even if they are not among of your input features. For e.g, you may not have a 'gender' feature in your data, but gender can be inferred from other features, such as sports, words used in the resume (especially if you used word embeddings to encode free text), whether graduated from a boys' only school etc.
 
+2) Build models:
+
+Instead of building an end to end model that transforms your inputs to outputs, in the unbias workflow you build multiple models:
+
+* Morpher
+    The morpher models transforms your inputs to a representation that (ideally) does not contain any biases. Input shape should match the shape of your input data (X). Output shape is arbitrary.
+
+* Task
+    The task model does the actual task you are trying to do: in this case making a hiring decision. Input shape should be same as the output shape of morpher. Output shape should match the shape of your output data (Y).
+
+* Discriminators
+    For each axis of bias (gender, race, etc), you have to build a classification model called discriminator. Input shape should be same as the output shape of morpher. Output shape should match the corresponding labels data (labels).
+
+3) Build Unbias model and fit your data
+
+```python
+unbias = Unbias(task, morpher, discriminators)
+unbias.fit(x, y, labels)
+```
+
+You can use `unbias.inference_model` for inference, which is a standard Keras model:
+
+```python
+unbias.inference_model.predict(x)
+```
