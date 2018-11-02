@@ -18,8 +18,11 @@ Vectorize your resumes. Convert hiring decisions to one hots. Your data should l
 2) Normally you would train a Keras model directly on this data like this:
 
 ```python
-from keras.models import Sequential()
+from keras.models import Sequential
 from keras.layers import *
+
+X = ...
+Y = ...
 
 model = Sequential()
 model.add(....)
