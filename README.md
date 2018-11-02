@@ -42,12 +42,15 @@ Note that your model can learn biases along such axes even if they are not among
 Instead of building an end to end model that transforms your inputs to outputs, in the unbias workflow you build multiple models:
 
 * Morpher
+
     The morpher models transforms your inputs to a representation that (ideally) does not contain any biases. Input shape should match the shape of your input data (X). Output shape is arbitrary.
 
 * Task
+
     The task model does the actual task you are trying to do: in this case making a hiring decision. Input shape should be same as the output shape of morpher. Output shape should match the shape of your output data (Y).
 
 * Discriminators
+
     For each axis of bias (gender, race, etc), you have to build a classification model called discriminator. Input shape should be same as the output shape of morpher. Output shape should match the corresponding labels data (labels).
 
 3) Build Unbias model and fit your data
