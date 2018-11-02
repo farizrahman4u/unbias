@@ -9,7 +9,6 @@ inputs, outputs, labels = get_data(3200, 100, 'classification', 2, 2, epochs=10)
 bias = get_bias(inputs, labels)
 
 
-
 def get_morpher():
     model = Sequential()
     model.add(Dense(100, input_dim=100))

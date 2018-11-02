@@ -4,12 +4,19 @@ from keras.layers import Activation
 from keras.layers import Dense
 from keras.layers import Dropout
 from keras.models import Model, Sequential
+from keras.models import load_model
 import keras.backend as K
 from keras.activations import softmax
 from keras.utils import Progbar
+from keras.engine.saving import pickle_model, unpickle_model
 import warnings
 import numpy as np
 import math
+
+try:
+    import h5py
+except ImportError:
+    h5py = None
 
 
 class Unbias(object):
@@ -76,9 +83,10 @@ class Unbias(object):
 
     def _build(self):
         disc_trainers = []
+        self.morpher.trainable = False
         for disc in self.discriminators:
+            disc.trainable = True
             inp = Input(batch_shape=self.morpher.input_shape)
-            self.morpher.trainable = False
             morphed = self.morpher(inp)
             disc_out = disc(morphed)
             trainer = Model(inp, disc_out)
@@ -116,6 +124,8 @@ class Unbias(object):
         morpher_trainer = Model(inp, prod)
         morpher_trainer.compile(loss='mse', optimizer='adam', metrics=['acc'])
         self.morpher_trainer = morpher_trainer
+        for disc in self.discriminators:
+            disc.trainable = True
         task_input = morphed
         out = self.task(task_input)
         model = Model(inp, out)
@@ -146,6 +156,7 @@ class Unbias(object):
         self.train_discriminators_on_batch(x, labels)
         self.train_morpher_and_task_on_batch(x, y)
 
+
     def fit(self, x, y, labels, batch_size=None, epochs=1, validation_split=None):
         if batch_size is None:
             batch_size = 32
@@ -157,8 +168,14 @@ class Unbias(object):
             labels_train = labels
         else:
             num_validation = int(len(x) * validation_split)
-            x_train = x[:-num_validation]
-            y_train = y[:-num_validation]
+            if isinstance(x_train, list):
+                x_train = [arr[:-num_validation] for arr in x_train]
+            else:
+                x_train = x[:-num_validation]
+            if isinstance(y_train, list):
+                y_train = [arr[:-num_validation] for arr in y_train]
+            else:
+                y_train = y[:-num_validation]
             labels_train = [l[:-num_validation] for l in labels]
         for epoch in range(epochs):
             print('Epoch {}'.format(epoch + 1))
@@ -177,30 +194,107 @@ class Unbias(object):
             bias = get_bias(self.morpher.predict(x_test), labels_test)
             return task_result, bias
 
+    def save(self, file):
+        if isinstance(file, h5py.Group):
+            must_close = False
+        else:
+            must_close = True
+            file = h5py.File(file, 'w')
+        task_group = file.create_group['task']
+        self.task.save(task_group)
+        morpher_group = file.create_group['morhper']
+        self.morpher.save(morpher_group)
+        disc_names = ['discriminator_' + str(i) for i in range(len(self.discriminators))]
+        file.attrs['discriminator_names'] = disc_names
+        for disc, disc_name in zip(self.discriminators, disc_names):
+            disc_group = file.create_group(disc_name)
+            disc.save(disc_group)
+        file.flush()
+        if must_close:
+            file.close()
 
-def get_bias(inputs, labels):
+    @classmethod
+    def load(cls, file, custom_objects={}):
+        if isinstance(file, str):
+            file = h5py.File(file, 'r')
+        task_group = file['task']
+        task = load_model(task_group, custom_objects)
+        morpher_group = file['morhper']
+        morpher = load_model(morpher_group, custom_objects)
+        disc_names = file.attrs['discriminator_names']
+        discriminators = []
+        for disc_name in disc_names:
+            disc_group = file[disc_name]
+            disc = load_model(disc_group, custom_objects)
+            discriminators.append(disc)
+        return cls(task, morpher, discriminators)
+
+    def get_weights(self):
+        task_w = self.task.get_weights()
+        morpher_w = self.morpher.get_weights()
+        disc_w = []
+        for disc in self.discriminators:
+            disc_w += disc.get_weights()
+        return task_w + morpher_w + disc_w
+
+    def set_weights(self, weights):
+        num_task_weights =len(self.task.weights)
+        task_weights = weights[:num_task_weights]
+        weights = weights[num_task_weights:]
+        self.task.set_weights(task_weights)
+        num_morpher_weights = len(self.morpher.weights)
+        morpher_weights = weights[:num_morpher_weights]
+        weights = weights[num_morpher_weights:]
+        self.morpher.set_weights(morpher_weights)
+        for disc in self.discriminators:
+            num_disc_weights = len(disc.weights)
+            disc_weights = weights[:num_disc_weights]
+            weights = weights[num_disc_weights:]
+            disc.set_weights(disc_weights)
+
+    def __getstate__(self):
+        task_state = pickle_model(self.task)
+        morpher_state = pickle_model(self.morpher)
+        disc_state = [pickle_model(disc) for disc in self.discriminators]
+        return {'task': task_state, 
+                'morpher': morpher_state,
+                'discriminators': disc_state}
+
+    def __setstate__(self, state):
+        task_state = state['task']
+        morpher_state = state['morphers']
+        disc_state = state['discriminators']
+        task = unpickle_model(task_state)
+        morpher = unpickle_model(morpher_state)
+        discriminators = [unpickle_model(disc) for disc in disc_state]
+        unb = Unbias(task, morpher, discriminators)
+        self.__dict__.update(unb.__dict__)
+
+
+def get_bias(inputs, labels, model=None):
     input_dim = inputs.shape[-1]
 
     biases = []
     for disc_vecs in labels:
         num_categories = disc_vecs.shape[-1]
-        clf = Sequential()
-        clf.add(Dense(input_dim, input_dim=input_dim))
-        clf.add(Activation('tanh'))
-        clf.add(Dropout(0.2))
-        clf.add(Dense(input_dim))
-        clf.add(Activation('tanh'))
-        clf.add(Dropout(0.2))
-        clf.add(Dense(input_dim))
-        clf.add(Activation('tanh'))
-        clf.add(Dropout(0.2))
-        clf.add(Dense(num_categories))
-        clf.add(Activation('softmax'))
-        clf.compile(loss='categorical_crossentropy', optimizer='adam', metrics=['acc'])
+        if model is None:
+            model = Sequential()
+            model.add(Dense(input_dim, input_dim=input_dim))
+            model.add(Activation('tanh'))
+            model.add(Dropout(0.2))
+            model.add(Dense(input_dim))
+            model.add(Activation('tanh'))
+            model.add(Dropout(0.2))
+            model.add(Dense(input_dim))
+            model.add(Activation('tanh'))
+            model.add(Dropout(0.2))
+            model.add(Dense(num_categories))
+            model.add(Activation('softmax'))
+            model.compile(loss='categorical_crossentropy', optimizer='adam', metrics=['acc'])
         split = 0.9
         num_train = int(len(inputs) * split)
-        clf.fit(inputs[:num_train], disc_vecs[:num_train], epochs=100)
-        acc = clf.evaluate(inputs[num_train:], disc_vecs[num_train:])[1]
+        model.fit(inputs[:num_train], disc_vecs[:num_train], epochs=100)
+        acc = model.evaluate(inputs[num_train:], disc_vecs[num_train:])[1]
         bias = acc - 1. / num_categories
         if bias < 0:
             bias = 0.
