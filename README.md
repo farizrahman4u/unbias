@@ -43,7 +43,7 @@ Instead of building an end to end model that transforms your inputs to outputs, 
 
 * Morpher
 
-    The morpher models transforms your inputs to a representation that (ideally) does not contain any biases. Input shape should match the shape of your input data (X). Output shape is arbitrary.
+    The morpher model transforms your inputs to a representation that (ideally) does not contain any biases. Input shape should match the shape of your input data (X). Output shape is arbitrary.
 
 * Task
 
