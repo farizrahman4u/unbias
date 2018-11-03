@@ -168,12 +168,12 @@ class Unbias(object):
             labels_train = labels
         else:
             num_validation = int(len(x) * validation_split)
-            if isinstance(x_train, list):
-                x_train = [arr[:-num_validation] for arr in x_train]
+            if isinstance(x, list):
+                x_train = [arr[:-num_validation] for arr in x]
             else:
                 x_train = x[:-num_validation]
-            if isinstance(y_train, list):
-                y_train = [arr[:-num_validation] for arr in y_train]
+            if isinstance(y, list):
+                y_train = [arr[:-num_validation] for arr in y]
             else:
                 y_train = y[:-num_validation]
             labels_train = [l[:-num_validation] for l in labels]
